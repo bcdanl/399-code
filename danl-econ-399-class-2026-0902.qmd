@@ -1,0 +1,236 @@
+---
+title: "Lecture 2"
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+
+ghg <- read_csv(
+  "https://bcdanl.github.io/data/GHG_emissions_by.csv"
+)
+
+positive_weak <- read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_weak_2017.csv"
+  )
+
+tweets <- bind_rows(
+  positive_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_weak_2017.csv"
+  ),
+  positive_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_strong_2017.csv"
+  ),
+  negative_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_weak_2017.csv"
+  ),
+  negative_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_strong_2017.csv"
+  ),
+  .id = "sample"
+)
+```
+
+
+# Classwork 1
+
+```{r}
+library(tidyverse)
+
+ghg_url <- "https://bcdanl.github.io/data/GHG_emissions_by.csv"
+
+ghg <- read_csv(
+  ghg_url,
+  show_col_types = FALSE
+)
+```
+
+One intended row represents one ________________________________ record.
+
+
+## 🧪 Part 1 · Audit before answering
+
+
+### 1A. Predict the output grain
+
+
+```{r}
+ghg |>
+  summarise(
+    rows = n(),
+    parties = n_distinct(Party),
+    first_year = min(Year),
+    last_year = max(Year),
+    sectors = n_distinct(Sector),
+    missing_values = sum(is.na(GHG_emissions))
+  )
+```
+
+
+
+### 1B. Audit the intended key
+
+
+```{r}
+ghg |>
+  count(Party, Year, Sector) |>
+  filter(n > 1)
+```
+
+
+
+### 🕳️ Part 2 · Locate missingness
+```{r}
+missing_by_sector <- ghg |>
+  group_by(Sector) |>
+  summarise(
+    rows = n(),
+    missing = sum(is.na(GHG_emissions)),
+    missing_share = mean(is.na(GHG_emissions)),
+    # .groups = "drop"
+  ) |>
+  arrange(desc(missing_share))
+
+missing_by_sector
+```
+
+1. Why would `sum(GHG_emissions, na.rm = TRUE)` be different from claiming that every missing value equals zero?
+2. Which additional variable would you group by to learn whether missingness is concentrated in particular years or parties?
+
+```{r}
+
+missing_by_sector_year <- ghg |>
+  group_by(Sector, Year) |>
+  summarise(
+    rows = n(),
+    missing = sum(is.na(GHG_emissions)),
+    missing_share = mean(is.na(GHG_emissions)),
+    # .groups = "drop"
+  ) |>
+  arrange(desc(missing_share)) |> 
+  filter( missing > 0) |> 
+  group_by(Sector) |> 
+  summarize(mean_missing = mean(missing),
+            sd_missing = sd(missing))
+
+missing_by_sector_year
+```
+```{r}
+
+missing_by_sector_party <- ghg |>
+  group_by(Sector, Party) |>
+  summarise(
+    rows = n(),
+    missing = sum(is.na(GHG_emissions)),
+    missing_share = mean(is.na(GHG_emissions)),
+    # .groups = "drop"
+  ) |>
+  arrange(desc(missing_share)) |> 
+  filter( missing > 0) |> 
+  group_by(Sector) |> 
+  summarize(mean_missing = mean(missing),
+            sd_missing = sd(missing, na.rm = T))
+
+missing_by_sector_party
+
+```
+
+
+## 🗂️ Part 3 · Make the working table legible
+
+```{r}
+ghg_working <- ghg |>
+  select(Party, Year, Sector, GHG_emissions) |>
+  rename(
+    party = Party,
+    year = Year,
+    sector = Sector,
+    emissions = GHG_emissions
+  ) |>
+  relocate(sector, party, year)
+
+glimpse(ghg_working)
+
+ghg_working
+```
+
+
+
+## 🇺🇸 Part 4 · Focus the environmental question
+
+Between 2005 and 2017, which U.S. sector values changed the most, and which changes can be expressed as percentages without using a nonpositive denominator?
+
+
+```{r}
+us_endpoints <- ghg_working |>
+  filter(
+    party == "United States of America",
+    year %in% c(2005, 2017)
+  ) |>
+  arrange(sector, year)
+
+us_endpoints
+```
+
+Before running it, predict:
+
+number of rows: ________
+one row now represents: ________________________________
+
+
+
+
+## 🧮 Part 5 · Change the grain and calculate change
+
+```{r}
+us_change <- us_endpoints |>
+  group_by(sector) |>
+  summarise(
+    start = first(emissions),
+    end = last(emissions),
+    endpoint_values = sum(!is.na(emissions)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    change = end - start,
+    pct_change = if_else(
+      start > 0,
+      100 * change / start,
+      NA_real_
+    )
+  ) |>
+  arrange(-pct_change)
+
+us_change
+```
+
+
+1. What does one row in us_change represent?
+2. Why did order matter before first() and last()?
+3. Why is pct_change missing for LULUCF even though both endpoints exist?
+4. Why should the positive change for a negative LULUCF value not be interpreted without sector documentation?
+
+
+## 📊 Part 6 · Produce the analytical artifact
+
+```{r}
+final_table <- us_change |>
+  transmute(
+    sector,
+    value_2005 = round(start),
+    value_2017 = round(end),
+    absolute_change = round(change),
+    percent_change = round(pct_change, 1),
+    audit_status = case_when(
+      endpoint_values < 2 ~ "missing endpoint",
+      start <= 0 ~ "nonpositive baseline",
+      TRUE ~ "percent reported"
+    )
+  )
+
+final_table
+```
+
+
+In this inventory file, the reported U.S. ________ value [rose/fell] by ________ between 2005 and 2017 (________% using a positive 2005 baseline); the file does not document ________, so the result should be interpreted as ________________________________.
+
