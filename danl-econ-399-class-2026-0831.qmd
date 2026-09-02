@@ -1,0 +1,442 @@
+---
+title: "Lecture 2"
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+
+ghg <- read_csv(
+  "https://bcdanl.github.io/data/GHG_emissions_by.csv"
+)
+
+positive_weak <- read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_weak_2017.csv"
+  )
+
+tweets <- bind_rows(
+  positive_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_weak_2017.csv"
+  ),
+  positive_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_strong_2017.csv"
+  ),
+  negative_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_weak_2017.csv"
+  ),
+  negative_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_strong_2017.csv"
+  ),
+  .id = "sample"
+)
+```
+
+```{r}
+ghg |>
+  summarise(
+    rows = n(),
+    parties = n_distinct(Party),
+    first_year = min(Year),
+    last_year = max(Year),
+    sectors = n_distinct(Sector),
+    missing_values =
+      sum(is.na(GHG_emissions))
+  )
+```
+
+```{r}
+ghg |> 
+  skimr::skim()
+```
+
+
+```{r}
+us_focus <- ghg |>
+  filter(
+    Party ==
+      "United States of America",
+    Sector %in%
+      c("Energy", "Waste"),
+    Year >= 2005,
+    !is.na(GHG_emissions)
+  )
+
+
+is_GHG_NA <- ghg |>
+  filter(
+    is.na(GHG_emissions)
+  ) |> 
+  count(Sector)
+
+is_GHG_NA_agri <- ghg |>
+  filter(
+    is.na(GHG_emissions),
+    Sector == "Agriculture"
+  ) 
+```
+
+
+```{r}
+ghg_working <- ghg |>
+  select(Party, Year, Sector, GHG_emissions) |>
+  rename(
+    party = Party,
+    year = Year,
+    sector = Sector,
+    emissions = GHG_emissions
+  ) |>
+  relocate(year, party, sector)
+```
+
+
+
+```{r}
+ghg |>
+  filter(GHG_emissions == NA)
+```
+
+```{r}
+ghg |>
+  filter(!is.na(GHG_emissions)) |>
+  select(
+    Party, Year, Sector, GHG_emissions
+  ) |>
+  arrange(desc(GHG_emissions)) |>
+  slice_head(n = 3)
+```
+
+
+```{r}
+ghg_change <- ghg |>
+  group_by(Party, Sector) |>
+  arrange(Year, .by_group = TRUE) |>
+  mutate(
+    annual_change = GHG_emissions - lag(GHG_emissions),
+    decreased = annual_change < 0
+  ) |>
+  ungroup()
+```
+
+
+```{r}
+df <- data.frame(x = 1:10,
+                 y = c(2,4,6,8,10,
+                       1,3,5,7,9))
+df <- df |> 
+  mutate(
+    x_lag = lag(x),  # previous value
+    x_lead = lead(x),  # next value
+    y_cumsum = cumsum(y),    # running sum
+    y_cummean = cummean(y),   # running average
+    y_cummin = cummin(y),    # running minimum
+    y_cummax = cummax(y)    # running maximum
+  ) |> 
+  mutate(
+    x_chg = x - lag(x)
+  )
+```
+
+
+
+
+```{r}
+df <- df |> 
+  mutate(
+    x_lag = lag(x),  # previous value
+    x_lead = lead(x),  # next value
+    y_cumsum = cumsum(y),    # running sum
+    y_cummean = cummean(y),   # running average
+    y_cummin = cummin(y),    # running minimum
+    y_cummax = cummax(y)    # running maximum
+  ) |> 
+  mutate(
+    x_chg = x - lag(x)
+  )
+```
+
+
+```{r}
+ghg_change <- ghg |>
+  group_by(Party, Sector) |>
+  arrange(Year, .by_group = TRUE) |>
+  mutate(
+    annual_change = GHG_emissions - lag(GHG_emissions),
+    decreased = annual_change < 0
+  ) |>
+  ungroup()
+```
+
+```{r}
+
+ghg_eg <- data.frame(country = c("A", "A", "A", "B", "B", "B"),
+                 year = c(2023, 2024, 2025, 2023, 2024, 2025),
+                 GHG = c(100, 110, 105, 200, 180, 165))
+
+ghg_eg <- ghg_eg |> 
+  mutate(GHG_prev_year = lag(GHG)) |> 
+  mutate(annual_change = GHG - lag(GHG)) |> 
+  relocate(annual_change, .after = GHG_prev_year)
+```
+
+
+
+```{r}
+
+ghg_eg <- data.frame(country = c("A", "A", "A", "B", "B", "B"),
+                 year = c(2023, 2024, 2025, 2023, 2024, 2025),
+                 GHG = c(100, 110, 105, 200, 180, 165))
+
+ghg_eg <- ghg_eg |> 
+  group_by(country) |> 
+  mutate(GHG_prev_year = lag(GHG)) |> 
+  mutate(annual_change = GHG - lag(GHG)) |> 
+  relocate(annual_change, .after = GHG_prev_year)
+```
+
+
+
+```{r}
+ghg_change_mistake <- ghg |>
+  mutate(
+    annual_change = GHG_emissions - lag(GHG_emissions),
+    decreased = annual_change < 0
+  ) |>
+  ungroup()
+```
+
+
+```{r}
+ghg |>
+  filter(Year == 2017) |>
+  group_by(Sector) |>
+  summarise(
+    reporting_parties = sum(!is.na(GHG_emissions)),
+    total_reported = sum(GHG_emissions, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(total_reported))
+```
+
+
+```{r}
+us_change <- ghg |>
+  filter(Party == "United States of America",
+         Year %in% c(1990, 2017)) |>
+  arrange(Sector, Year) |>
+  group_by(Sector) |>
+  summarise(start = first(GHG_emissions),
+            end = last(GHG_emissions),
+            .groups = "drop") |>
+  mutate(change = end - start,
+         pct_change = change / start) |>
+  arrange(pct_change) |> 
+  relocate(pct_change, .before = change)
+
+us_change
+```
+
+
+```{r}
+us_change |>
+  mutate(
+    is_increased = if_else(
+      change > 0,
+      T,
+      F
+    )
+  )
+```
+
+```{r}
+us_change |>
+  mutate(
+    pct_change2 = if_else(
+      start > 0,
+      100 * change / start,
+      NA_real_
+    )
+  )
+```
+
+
+
+```{r}
+tweets <- bind_rows(
+  positive_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_weak_2017.csv"
+  ),
+  positive_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_positive_strong_2017.csv"
+  ),
+  negative_weak = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_weak_2017.csv"
+  ),
+  negative_strong = read_csv(
+    "https://bcdanl.github.io/data/UStweets_negative_strong_2017.csv"
+  ),
+  .id = "sample"
+) |>
+  mutate(
+    sentiment = if_else(
+      str_starts(sample, "positive"), "positive", "negative"
+    ),
+    strength = if_else(
+      str_ends(sample, "strong"), "strong", "weak"
+    )
+  )
+```
+
+
+```{r}
+counts <- tweets |>
+  count(
+    sentiment, strength,
+    name = "tweets"
+  ) |>
+  mutate(
+    share = tweets / sum(tweets)
+  ) |>
+  arrange(desc(tweets))
+
+counts
+```
+
+
+```{r}
+tweets |>
+  mutate(suspicious_encoding = str_detect(content, "[âÂ]")) |>
+  summarise(
+    rows = n(),
+    flagged = sum(suspicious_encoding),
+    flagged_share = mean(suspicious_encoding)
+  )
+```
+
+
+```{r}
+hurricane_pattern <- regex(
+  "\\bhurricanes?\\b",
+  ignore_case = TRUE
+)
+
+tweets |>
+  filter(str_detect(content, hurricane_pattern)) |>
+  count(sentiment, strength,
+        name = "tweets") |>
+  mutate(share = tweets / sum(tweets)) |>
+  arrange(desc(tweets))
+```
+
+```{r}
+tweets |>
+  mutate(
+    hurricane = str_detect(content,
+      regex("\\bhurricanes?\\b", ignore_case = TRUE)),
+    wildfire = str_detect(content,
+      regex("\\bwildfires?\\b", ignore_case = TRUE)),
+    flood = str_detect(content,
+      regex("\\bflood(s|ed|ing)?\\b", ignore_case = TRUE)),
+    drought = str_detect(content,
+      regex("\\bdroughts?\\b", ignore_case = TRUE))
+  ) |>
+  summarise(
+    across(hurricane:drought, \(x) sum(x, na.rm = TRUE))
+  )
+```
+
+
+```{r}
+tweets |>
+  mutate(
+    hurricane = str_detect(content,
+      regex("\\bhurricanes?\\b", ignore_case = TRUE)),
+    wildfire = str_detect(content,
+      regex("\\bwildfires?\\b", ignore_case = TRUE)),
+    flood = str_detect(content,
+      regex("\\bflood(s|ed|ing)?\\b", ignore_case = TRUE)),
+    drought = str_detect(content,
+      regex("\\bdroughts?\\b", ignore_case = TRUE))
+  ) |>
+  summarise(
+    hurricane = sum(hurricane, na.rm = TRUE),
+    wildfire = sum(wildfire, na.rm = TRUE),
+    flood = sum(flood, na.rm = TRUE),
+    drought = sum(drought, na.rm = TRUE)
+  )
+```
+
+```{r}
+tweets |>
+  group_by(sentiment, strength) |>
+  summarise(
+    rows = n(),
+    unique_text = n_distinct(content),
+    duplicate_rows = rows - unique_text,
+    duplicate_share = duplicate_rows / rows,
+    .groups = "drop"
+  ) |>
+  arrange(desc(duplicate_share))
+```
+
+```{r}
+tweets |> 
+  distinct()
+```
+
+
+```{r}
+ghg |> 
+  group_by(Sector) |> 
+  summarise(ghg_median = median(GHG_emissions, na.rm = T)) |> 
+  arrange(-ghg_median)
+```
+
+
+```{r}
+ghg |> 
+  arrange(Sector, -GHG_emissions) |> 
+  group_by(Sector) |> 
+  mutate(ranking = dense_rank(-GHG_emissions),
+         ranking_min = min_rank(-GHG_emissions),
+         ) |> 
+  filter(ranking <= 3)
+```
+
+```{r}
+ghg |> 
+  group_by(Sector) |> 
+  slice_max(GHG_emissions, n = 3,
+            with_ties = F)
+```
+
+
+
+```{r}
+ghg |> 
+  group_by(Sector) |> 
+  slice_max(GHG_emissions, prop = 0.01)
+```
+
+
+
+```{r}
+# Count unique tweet texts by sentiment and strength.
+tweets |> 
+  count(sentiment, strength)
+
+tweets |> 
+  mutate(
+    hurricane = str_detect(content,
+      regex("\\bhurricanes?\\b", ignore_case = TRUE))
+  ) |> 
+  group_by(sentiment, strength) |> 
+  summarise(
+    n = n(),
+    n_unique = n_distinct(content),
+    n_hurricane = sum(hurricane),
+    pct_hurricane = 100 * n_hurricane / n
+  )
+```
+
+
+
