@@ -1,0 +1,52 @@
+---
+title: Classwork 2
+format: html
+editor: visual
+---
+
+
+```{r}
+library(tidyverse)
+
+solar_path <- "https://bcdanl.github.io/data/nyserda_solar_county_year_2026-06-30.csv"
+
+solar <- read_csv(
+  solar_path,
+  show_col_types = FALSE
+) |>
+  mutate(
+    data_through_date = as.Date(data_through_date),
+    interconnection_year = as.integer(interconnection_year)
+  )
+```
+
+
+
+```{r}
+sum(solar$source_rows == solar$projects)
+sum(solar$source_rows == solar$production_records)
+```
+
+
+```{r}
+solar |> 
+  count(interconnection_year)
+```
+
+
+```{r}
+solar |> 
+  # filter(interconnection_year == 2019) |> 
+  count(county) |> 
+  arrange(n)
+```
+
+
+```{r}
+solar |> 
+  filter(county == "Bennington" | county == "Wyoming", interconnection_year == 2019 )
+```
+
+
+
+
