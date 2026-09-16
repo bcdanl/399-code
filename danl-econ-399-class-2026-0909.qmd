@@ -48,5 +48,229 @@ solar |>
 ```
 
 
+```{r}
+# what is negation of AND?
+# OR
+solar_cleaned <- solar |> 
+  filter(
+    !(county == "Bennington" & interconnection_year == 2019)
+  )
+
+solar_cleaned_2 <- solar |> 
+  filter(
+    county != "Bennington" | interconnection_year != 2019
+  )
+
+```
+
+
+## Part B
+
+```{r}
+solar |>
+  summarise(
+    rows = n(),
+    counties = n_distinct(county),
+    first_year = min(interconnection_year),
+    last_year = max(interconnection_year),
+    source_rows = sum(source_rows),
+    projects = sum(projects),
+    capacity_missing_records = sum(is.na(capacity_records)),
+    production_missing_records = sum(is.na(production_records))
+  )
+```
+
+
+```{r}
+library(skimr)
+solar_cleaned |> 
+  skim()
+```
+
+
+```{r}
+solar_cleaned |> 
+  filter(source_rows != projects)
+```
+
+
+
+```{r}
+solar_cleaned |>
+  count(county, interconnection_year) |> 
+  filter(n > 1)
+```
+
+
+```{r}
+solar_cleaned |> 
+  distinct(county) |> 
+  arrange(county)
+
+```
+
+
+```{r}
+solar_cleaned |> 
+  filter(projects < capacity_records |
+           projects > capacity_records )
+
+solar_cleaned |> 
+  filter(projects != capacity_records ) # 15
+
+
+solar_cleaned |> 
+  filter(projects > capacity_records ) # 15
+```
+
+```{r}
+solar_complete <- solar_cleaned |> 
+  filter(interconnection_year <= 2025)
+```
+
+
+
+```{r}
+state_year <- solar_complete |>
+  group_by(interconnection_year) |>
+  summarise(
+    projects = sum(projects),
+    capacity_mw = sum(capacity_kwdc) / 1000,
+    counties = n_distinct(county),
+    # capacity_missing_records = sum(___ - ___),
+    # .groups = "drop"
+  ) |>
+  mutate(
+    average_kwdc_per_project = 1000 * capacity_mw / projects
+  )
+
+state_year
+
+# yearly trend of average_kwdc_per_project
+  # x-axis: interconnection_year
+  # y-axis: average_kwdc_per_project
+
+# scatter plot
+# scatter plot with fitted line
+# fitted line
+# line chart
+# bar chart
+
+state_year |> 
+  ggplot(
+    aes(x = interconnection_year,
+        y = average_kwdc_per_project)
+  ) +
+  geom_bar(stat = "identity",
+           fill = "lightblue",
+           color = "black") +
+  theme_minimal()
+  # geom_point() +
+  # geom_line() 
+  # geom_smooth(se = F)
+
+```
+
+
+```{r}
+
+state_year |> 
+  ggplot(
+    aes(x = interconnection_year,
+        y = average_kwdc_per_project)
+  ) +
+  # geom_bar(stat = "identity",
+  #          fill = "lightblue",
+  #          color = "black") 
+  geom_point() +
+  geom_line() +
+  theme_minimal()
+  # geom_smooth(se = F)
+
+```
+
+
+
+```{r}
+ggplot(state_year, 
+       aes(x = ___, y = ___)) +
+  geom_col(fill = "#1c5d99") +
+  labs(
+    title = "New York distributed-solar projects by interconnection year",
+    subtitle = "Observed project counts; 2026 excluded as a partial year",
+    x = NULL,
+    y = "Interconnected projects",
+    caption = "Source: NYSERDA statewide distributed-solar projects; data through 2026-06-30"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+```{r}
+
+state_year |> 
+  ggplot(aes(x = interconnection_year, y = projects)) +
+  geom_col(fill = "#1c5d99") +
+  labs(
+    title = "New York distributed-solar projects by interconnection year",
+    subtitle = "Observed project counts; 2026 excluded as a partial year",
+    x = NULL,
+    y = "Interconnected projects",
+    caption = "Source: NYSERDA statewide distributed-solar projects; data through 2026-06-30"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+
+
+```{r}
+county_2025 <- solar_complete |>
+  filter(interconnection_year == 2025) |>
+  mutate(
+    statewide_projects = sum(projects),
+    project_share = projects / statewide_projects,
+    capacity_mw = capacity_kwdc / 1000,
+    average_kwdc_per_project = 1000 * capacity_mw / projects
+  ) |>
+  arrange(desc(project_share))
+
+final_table <- county_2025 |>
+  slice_head(n = 10) |>
+  transmute(
+    county,
+    projects,
+    project_share_percent = round(100 * project_share, 1),
+    capacity_mw = round(capacity_mw, 1),
+    average_kwdc_per_project = round(average_kwdc_per_project, 1)
+  )
+
+final_table
+```
+
+```{r}
+#| fig-height: 15
+
+county_2025 |> 
+  ggplot(
+    aes(y = projects, 
+        x = fct_reorder(county, projects)
+        # x = county
+        )
+  ) +
+  geom_col(fill = "#2e7d5b") +
+  coord_flip() +
+  labs(
+    title = "Ten counties with the most interconnected projects in 2025",
+    subtitle = "Counts, not rates; no eligible-building denominator is available",
+    x = NULL,
+    y = "Projects",
+    caption = "Source: NYSERDA statewide distributed-solar projects; data through 2026-06-30"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+
+
+
+
 
 

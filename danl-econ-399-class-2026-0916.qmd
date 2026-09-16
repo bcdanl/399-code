@@ -1,0 +1,270 @@
+---
+title: "Classwork 3"
+editor: visual
+---
+
+```{r}
+getwd()
+
+data_dir <- file.path("data", "nrel-rooftop-pv")
+dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
+
+workbook_url <- paste0(
+  "https://data.nlr.gov/system/files/121/",
+  "Rooftop_PV_Technical_Potential.xlsx"
+)
+
+xlsx_file <- file.path(
+  data_dir,
+  "Rooftop_PV_Technical_Potential.xlsx"
+)
+
+if (!file.exists(xlsx_file)) {
+  download.file(
+    workbook_url,
+    destfile = xlsx_file,
+    mode = "wb",
+    method = "libcurl"
+  )
+}
+
+file.exists(xlsx_file)
+file.size(xlsx_file)
+```
+
+
+```{r}
+# Run once in the Console if needed:
+# install.packages(c("tidyverse", "readxl"))
+
+library(tidyverse)
+library(readxl)
+```
+
+
+```{r}
+excel_sheets(xlsx_file)
+```
+
+
+
+```{r}
+suitability_raw <- read_excel(
+  xlsx_file,
+  sheet = "Small_Building_Suitability"
+) |>
+  mutate(
+    fipsstco = str_pad(as.character(fipsstco), width = 5, pad = "0"),
+    state_fips = str_pad(as.character(state_fips), width = 2, pad = "0"),
+    zip = str_pad(as.character(zip), width = 5, pad = "0")
+  )
+
+glimpse(suitability_raw)
+```
+
+
+```{r}
+provenance <- tibble(
+  dataset = "Rooftop Photovoltaic Technical Potential in the United States",
+  doi = "10.7799/1575064",
+  source_url = workbook_url,
+  worksheet = "Small_Building_Suitability",
+  downloaded_on = Sys.Date(),
+  workbook_bytes = file.size(xlsx_file),
+  cleaning_rule = "Treat -999 as missing; retain nonnegative nbld and pct_suitab in [0, 1]"
+)
+
+provenance
+```
+
+
+## Q1b
+
+```{r}
+suitability_raw |>
+  summarise(
+    rows = n(),
+    states_and_dc = n_distinct(state),
+    zip_keys = n_distinct(zip),
+    counties = n_distinct(county),
+    counties_fips = n_distinct(fipsstco),
+    minimum_building_count = min(nbld),
+    minimum_suitability = min(pct_suitab)
+  )
+```
+
+```{r}
+suitability_raw |> 
+  filter(nbld == -999) |> 
+  nrow()
+```
+
+
+```{r}
+suitability_raw |> 
+  filter(pct_suitab == -999) |> 
+  nrow()
+```
+
+
+```{r}
+ny_raw <- suitability_raw |>
+  filter(state == "NY")
+
+
+tmp <- ny_raw |> 
+  summarize(n_zipcode = n_distinct(zip))
+
+ny_audit <- ny_raw |>
+  summarise(
+    rows = n(),
+    zip_keys = n_distinct(zip),
+    counties = n_distinct(county),
+    counties_fips = n_distinct(fipsstco),
+    negative_building_counts = sum(nbld < 0),
+    zero_building_counts = sum(nbld == 0),
+    invalid_suitability = sum(!between(pct_suitab, 0, 1)),
+    rows_with_a_sentinel = sum(
+      nbld < 0 | !between(pct_suitab, 0, 1)
+    )
+  )
+
+ny_audit
+```
+
+
+```{r}
+ny_raw |>
+  filter(nbld < 0 | !between(pct_suitab, 0, 1)) |>
+  select(state_zip, county, nbld, pct_suitab) |>
+  arrange(nbld, pct_suitab)
+```
+
+```{r}
+ny_raw |> 
+  filter(county == "NEW YORK") |> 
+  select(state_zip, county, nbld, pct_suitab) |>
+  arrange(nbld, pct_suitab)
+```
+
+```{r}
+
+ny_raw |> 
+  filter(county == "LIVINGSTON") |> 
+  select(state_zip, county, nbld, pct_suitab) |>
+  arrange(pct_suitab, nbld)
+```
+
+```{r}
+
+
+ny_raw |> 
+  filter(nbld == 0) |> 
+  select(state_zip, county, nbld, pct_suitab) |>
+  arrange(pct_suitab, nbld)
+```
+
+```{r}
+
+tmp <- ny_raw |>
+  mutate(
+    nbld = na_if(nbld, -999),
+    pct_suitab = na_if(pct_suitab, -999)
+  ) 
+
+
+library(skimr)
+nbld_sum <- skim(tmp$nbld)
+nbld_sum_raw <- skim(ny_raw$nbld)
+
+
+
+ny_suitability <- ny_raw |>
+  mutate( 
+    nbld = na_if(nbld, -999),  # nbld = ifelse(nbld == -999, NA, nbld)
+    pct_suitab = na_if(pct_suitab, -999)  # pct_suitab = ifelse(pct_suitab == -999, NA, pct_suitab)
+  ) |> 
+  filter(
+    !is.na(nbld),
+    !is.na(pct_suitab),
+    nbld >= 0,
+    between(pct_suitab, 0, 1)
+  ) |>
+  mutate(
+    estimated_suitable_buildings = nbld * pct_suitab
+  )
+
+ny_suitability |>
+  summarise(
+    zip_rows = n(),
+    counties = n_distinct(fipsstco),
+    modeled_small_buildings = sum(nbld),
+    estimated_suitable_buildings = sum(estimated_suitable_buildings)
+  )
+```
+
+```{r}
+state_summary <- ny_suitability |>
+  summarise(
+    zip_rows = n(),
+    modeled_small_buildings = sum(nbld),
+    unweighted_zip_mean = mean(pct_suitab),
+    estimated_suitable_buildings = sum(estimated_suitable_buildings),
+    building_weighted_suitability =
+      sum(estimated_suitable_buildings) / sum(nbld)
+  )
+
+state_summary
+```
+
+
+
+```{r}
+county_suitability <- ny_suitability |>
+  group_by(fipsstco, county) |>
+  summarise(
+    zip_rows = n(),
+    modeled_small_buildings = sum(nbld),
+    estimated_suitable_buildings = sum(estimated_suitable_buildings),
+    unweighted_zip_mean = mean(pct_suitab),
+    building_weighted_suitability =
+      sum(estimated_suitable_buildings) / sum(nbld),
+    .groups = "drop"
+  ) |>
+  mutate(county = str_to_title(county))
+
+county_suitability
+```
+
+
+
+```{r}
+statewide_rate <- state_summary |>
+  pull(building_weighted_suitability)
+
+ggplot(
+  county_suitability,
+  aes(x = building_weighted_suitability)
+) +
+  geom_histogram(
+    binwidth = 0.01,
+    boundary = 0,
+    color = "white",
+    fill = "#2e7d5b"
+  ) +
+  geom_vline(
+    xintercept = statewide_rate,
+    color = "#c65d21",
+    linewidth = 1
+  ) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    title = "Modeled small-building rooftop suitability varies across New York counties",
+    subtitle = "County estimates weight ZIP rows by NREL's modeled small-building count",
+    x = "Estimated share of small buildings with some suitable roof area",
+    y = "Counties",
+    caption = "Source: Gagnon, Margolis, and Phillips (2019), NREL technical-potential dataset"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
