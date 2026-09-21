@@ -1,0 +1,104 @@
+---
+title: "Classwork 4"
+format: html
+---
+
+
+# 0A. Load packages and prepare an API output folder
+
+```{r}
+library(tidyverse)
+library(scales)
+library(sf)
+library(hrbrthemes)
+
+data_dir <- file.path("data", "governance-climate-finance")
+dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+
+# 0B. Read the CSV files from their URLs
+
+```{r}
+oecd_total <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/oecd_climate_finance_2013_2024.csv",
+  show_col_types = FALSE
+)
+
+paper_projects <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/paper_project_allocations_2011_2020.csv",
+  show_col_types = FALSE
+)
+
+world_bank <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/world_bank_country_year_2009_latest.csv",
+  show_col_types = FALSE
+)
+
+rio_recipient <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/oecd_riomarkers_recipient_2020_2024.csv",
+  show_col_types = FALSE
+)
+
+world_polygons <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/world_admin0_110m.csv",
+  show_col_types = FALSE
+)
+
+latest_matched <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/latest_governance_mitigation_oda_2024.csv",
+  show_col_types = FALSE
+)
+```
+
+
+
+```{r}
+wgi_spec <- tribble(
+  ~indicator_code, ~variable,
+  "GOV_WGI_VA.SC", "voice_accountability",
+  "GOV_WGI_PV.SC", "political_stability",
+  "GOV_WGI_GE.SC", "government_effectiveness",
+  "GOV_WGI_RQ.SC", "regulatory_quality",
+  "GOV_WGI_RL.SC", "rule_of_law",
+  "GOV_WGI_CC.SC", "control_of_corruption"
+)
+
+fetch_wgi <- function(indicator_code, variable) {
+  api_url <- paste0(
+    "https://api.worldbank.org/v2/country/all/indicator/",
+    indicator_code,
+    "?source=3&format=json&per_page=20000&date=2020:2024"
+  )
+
+  payload <- jsonlite::fromJSON(api_url, simplifyDataFrame = TRUE)
+  observations <- payload[[2]]
+
+  tibble(
+    iso3 = observations$countryiso3code,
+    country = observations$country$value,
+    year = as.integer(observations$date),
+    variable = variable,
+    value = as.numeric(observations$value)
+  ) |>
+    filter(str_length(iso3) == 3)
+}
+
+wgi_api_long <- map2_dfr(
+  wgi_spec$indicator_code,
+  wgi_spec$variable,
+  fetch_wgi
+)
+
+wgi_api_2024 <- wgi_api_long |>
+  select(iso3, country, year, variable, value) |>
+  pivot_wider(names_from = variable, values_from = value)
+
+write_csv(
+  wgi_api_2024,
+  file.path(data_dir, "wgi_api_2024.csv"),
+  na = ""
+)
+```
+
+
