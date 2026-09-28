@@ -1,0 +1,594 @@
+---
+title: "Classwork 4"
+format: html
+---
+
+
+# 0A. Load packages and prepare an API output folder
+
+```{r}
+library(tidyverse)
+library(scales)
+library(sf)
+library(hrbrthemes)
+
+data_dir <- file.path("data", "governance-climate-finance")
+dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
+```
+
+
+# 0B. Read the CSV files from their URLs
+
+```{r}
+oecd_total <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/oecd_climate_finance_2013_2024.csv",
+  show_col_types = FALSE
+)
+
+paper_projects <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/paper_project_allocations_2011_2020.csv",
+  show_col_types = FALSE
+)
+
+world_bank <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/world_bank_country_year_2009_latest.csv",
+  show_col_types = FALSE
+)
+
+rio_recipient <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/oecd_riomarkers_recipient_2020_2024.csv",
+  show_col_types = FALSE
+)
+
+world_polygons <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/world_admin0_110m.csv",
+  show_col_types = FALSE
+)
+
+latest_matched <- read_csv(
+  "https://bcdanl.github.io/399/data/governance-climate-finance/latest_governance_mitigation_oda_2024.csv",
+  show_col_types = FALSE
+)
+```
+
+
+
+```{r}
+wgi_spec <- tribble(
+  ~indicator_code, ~variable,
+  "GOV_WGI_VA.SC", "voice_accountability",
+  "GOV_WGI_PV.SC", "political_stability",
+  "GOV_WGI_GE.SC", "government_effectiveness",
+  "GOV_WGI_RQ.SC", "regulatory_quality",
+  "GOV_WGI_RL.SC", "rule_of_law",
+  "GOV_WGI_CC.SC", "control_of_corruption"
+)
+
+fetch_wgi <- function(indicator_code, variable) {
+  api_url <- paste0(
+    "https://api.worldbank.org/v2/country/all/indicator/",
+    indicator_code,
+    "?source=3&format=json&per_page=20000&date=2020:2024"
+  )
+
+  payload <- jsonlite::fromJSON(api_url, simplifyDataFrame = TRUE)
+  observations <- payload[[2]]
+
+  tibble(
+    iso3 = observations$countryiso3code,
+    country = observations$country$value,
+    year = as.integer(observations$date),
+    variable = variable,
+    value = as.numeric(observations$value)
+  ) |>
+    filter(str_length(iso3) == 3)
+}
+
+wgi_api_long <- map2_dfr(
+  wgi_spec$indicator_code,
+  wgi_spec$variable,
+  fetch_wgi
+)
+
+wgi_api_2024 <- wgi_api_long |>
+  select(iso3, country, year, variable, value) |>
+  pivot_wider(names_from = variable, values_from = value)
+
+write_csv(
+  wgi_api_2024,
+  file.path(data_dir, "wgi_api_2024.csv"),
+  na = ""
+)
+```
+
+
+```{r}
+wgi_api_2024 <- read_csv(paste0(data_dir,"/","wgi_api_2024.csv"))
+```
+
+```{r}
+goal_comparison <- oecd_total |>
+  transmute(
+    year,
+    total_usd_billion = grand_total_usd_billion,
+    difference_from_100b = total_usd_billion - 100,
+    reached_100b = total_usd_billion >= 100
+  )
+
+goal_comparison
+```
+
+
+```{r}
+#| fig-height: 10
+
+oecd_components <- oecd_total |>
+  select(
+    year,
+    bilateral_public_usd_billion,
+    multilateral_public_attributed_usd_billion,
+    export_credits_usd_billion,
+    private_mobilised_usd_billion
+  ) |>
+  pivot_longer(
+    -year,
+    names_to = "component",
+    values_to = "funding"
+  ) |>
+  mutate(
+    component = component |>
+      str_remove("_usd_billion$") |>
+      str_replace_all("_", " ") |>
+      str_to_sentence()
+  )
+
+oecd_components |> 
+  filter(year >= 2016) |> 
+  ggplot(
+    aes(x = year, y = funding, 
+        color = component )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.2) +
+  scale_color_viridis_d(option = "D", end = 0.9) +
+  scale_x_continuous(breaks = 2016:2024) +
+  scale_y_continuous(labels = label_dollar(suffix = "B")) +
+  labs(
+    title = "Components of climate finance provided and mobilised",
+    subtitle = "Developed-country finance for developing countries, 2016-2024",
+    x = NULL,
+    y = "Current USD billions",
+    color = NULL,
+    caption = "Source: OECD (2026). Components differ in accounting basis."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "Y") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+developing_income_groups <- c(
+  "Low income",
+  "Lower middle income",
+  "Upper middle income"
+)
+
+paper_analysis <- paper_projects |>
+  filter(
+    income_group_at_source %in% developing_income_groups,
+    !is.na(income_group_at_source)
+  ) |>
+  mutate(
+    allocated_positive_usd = pmax(project_contribution_usd, 0),
+    adjustment_negative_usd = pmin(project_contribution_usd, 0)
+  )
+
+paper_analysis |>
+  summarise(
+    rows = n(),
+    projects = n_distinct(project_id),
+    countries = n_distinct(recipient_iso3),
+    sectors = n_distinct(sector),
+    negative_rows = sum(project_contribution_usd < 0)
+  )
+```
+
+```{r}
+negative_usd <- paper_analysis |> 
+  filter(project_contribution_usd < 0)
+```
+
+
+```{r}
+paper_analysis |> 
+  distinct(project_id) |> 
+  nrow()
+```
+
+```{r}
+paper_analysis |> 
+  filter(project_id %in% negative_usd$project_id)
+```
+
+
+
+```{r}
+
+paper_analysis |> 
+  group_by(project_id) |> 
+  filter(n() > 1)
+```
+
+
+```{r}
+
+paper_analysis |> 
+  distinct(sector) |> 
+  nrow()
+
+sector_summary <- paper_analysis |>
+  filter(sector != "Cross-cutting") |> 
+  group_by(sector) |>
+  summarise(
+    projects = n_distinct(project_id),
+    positive_usd_billion = sum(allocated_positive_usd) / 1e9,
+    .groups = "drop"
+  ) |>
+  slice_max(positive_usd_billion, n = 10) |>
+  arrange(-positive_usd_billion)
+
+sector_summary |> 
+  ggplot(
+    aes(x = positive_usd_billion, 
+        y = fct_reorder(sector, positive_usd_billion), 
+        fill = positive_usd_billion)
+  ) +
+  geom_col(width = 0.72, show.legend = FALSE, color = "blue") +
+  scale_fill_viridis_c(option = "D", end = 0.9) +
+  scale_x_continuous(labels = label_dollar(suffix = "B")) +
+  labs(
+    title = "Largest sectors in the assembled project archive",
+    subtitle = "Low- and middle-income recipient rows, 2011-2019",
+    x = "Positive allocations, current USD billions",
+    y = NULL,
+    caption = "Source: Choe and Ore-Monago project archive. This is not a global total."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "X")
+```
+
+```{r}
+wb_2024 <- world_bank |>
+  filter(
+    year == 2024,
+    income_code_current %in% c("LIC", "LMC", "UMC")
+  ) |>
+  select(
+    iso3,
+    country,
+    region,
+    income_group_current,
+    population,
+    voice_accountability,
+    political_stability,
+    government_effectiveness,
+    regulatory_quality,
+    rule_of_law,
+    rule_of_law_lower,
+    rule_of_law_upper,
+    control_of_corruption
+  )
+
+rio_2024 <- rio_recipient |>
+  filter(year == 2024) |>
+  select(
+    recipient_iso3,
+    adaptation_total_usd_millions,
+    mitigation_total_usd_millions
+  )
+
+current <- wb_2024 |>
+  left_join(
+    rio_2024,
+    by = c("iso3" = "recipient_iso3"),
+    relationship = "one-to-one"
+  ) |>
+  
+  mutate(
+    rio_recorded = !is.na(iso3),
+    
+    across(
+      c(adaptation_total_usd_millions, mitigation_total_usd_millions),
+      ~ replace_na(.x, 0)
+    ),
+    
+    mitigation_usd_per_person =
+      mitigation_total_usd_millions * 1e6 / population
+  )
+
+current |>
+  summarise(
+    rows = n(),
+    unique_iso3 = n_distinct(iso3),
+    rio_records = sum(rio_recorded),
+    missing_rule_of_law = sum(is.na(rule_of_law))
+  )
+```
+
+```{r}
+#| fig-height: 10
+
+governance_distribution <- current |>
+  filter(!is.na(income_group_current)) |>
+  mutate(
+    income_group_current = fct_relevel(
+      income_group_current,
+      "Low income",
+      "Lower middle income",
+      "Upper middle income"
+    )
+  )
+
+governance_distribution |> 
+  ggplot(
+    aes(x = income_group_current, y = rule_of_law, fill = income_group_current)
+) +
+  geom_violin(alpha = 0.45, color = NA, trim = FALSE) +
+  geom_boxplot(width = 0.18, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.08, alpha = 0.45, size = 1.4) +
+  scale_fill_viridis_d(option = "D", end = 0.9) +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Rule of Law scores vary within every income group",
+    subtitle = "Low- and middle-income economies with 2024 WGI observations",
+    x = NULL,
+    y = "Rule of Law score, 0-100",
+    fill = NULL,
+    caption = "Source: World Bank WGI, 2025 revision."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "Y") +
+  theme(axis.text.x = element_text(angle = 12, hjust = 1)) +
+  guides(fill = "none")
+```
+
+
+```{r}
+mitigation_rank <- current |>
+  filter(
+    !is.na(mitigation_usd_per_person),
+    mitigation_usd_per_person > 0
+  ) |>
+  slice_max(mitigation_usd_per_person, n = 15) |>
+  mutate(country = fct_reorder(country, mitigation_usd_per_person))
+
+
+mitigation_rank |> 
+  ggplot(aes(x = mitigation_usd_per_person, 
+             y = country)) +
+  geom_segment(
+    aes(x = 0, xend = mitigation_usd_per_person, yend = country),
+    color = "grey75",
+    linewidth = 0.8
+  ) +
+  geom_point(aes(color = mitigation_usd_per_person), size = 3) +
+  scale_color_viridis_c(option = "D", end = 0.9, guide = "none") +
+  scale_x_continuous(labels = label_dollar(accuracy = 1)) +
+  labs(
+    title = "Largest mitigation-marked ODA amounts per person",
+    subtitle = "Top 15 low- and middle-income economies in the 2024 snapshot",
+    x = "Current USD per person",
+    y = NULL,
+    caption = "Sources: OECD Rio Markers and World Bank population. Positive recorded amounts only."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "X")
+```
+
+```{r}
+#| fig-height: 8
+
+# scatter_data <- ___ |>
+#   filter(
+#     !is.na(___),
+#     ___ > 0
+#   )
+
+current |> 
+  ggplot(
+    aes(x = rule_of_law, 
+        y = mitigation_usd_per_person, 
+        color = income_group_current)
+  ) +
+  geom_point(size = 2.6, alpha = 0.72) +
+  geom_smooth(
+    aes(group = 1),
+    method = "loess",
+    formula = y ~ x,
+    se = FALSE,
+    color = "grey25",
+    linewidth = 0.9
+  ) +
+  scale_color_viridis_d(option = "D", end = 0.9) +
+  scale_y_log10(labels = label_dollar(accuracy = 0.01)) +
+  labs(
+    title = "Rule of Law and mitigation-marked bilateral ODA",
+    subtitle = "Low- and middle-income economies with positive recorded amounts, 2024",
+    x = "Rule of Law score, 0-100",
+    y = "Current USD per person, log scale",
+    color = NULL,
+    caption = "The smooth curve summarizes the displayed observations. Sources: OECD and World Bank."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "Y") +
+  theme(legend.position = "bottom")
+```
+
+
+
+```{r}
+uncertainty_data <- wb_2024 |>
+  filter(
+    rule_of_law > 0,
+    !is.na(rule_of_law),
+    !is.na(rule_of_law_lower),
+    !is.na(rule_of_law_upper)
+  ) |>
+  slice_max(rule_of_law, n = 10) |>
+  mutate(country = fct_reorder(country, rule_of_law))
+
+uncertainty_data |> 
+  ggplot(aes(x = rule_of_law, 
+             y = country)) +
+  geom_errorbarh(
+    aes(xmin = rule_of_law_lower, 
+        xmax = rule_of_law_upper),
+    height = 0.15,
+    color = "grey70",
+    linewidth = 0.8
+  ) +
+  geom_point(aes(color = rule_of_law), size = 3) +
+  scale_color_viridis_c(limits = c(0, 100), option = "D", guide = "none") +
+  scale_x_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Rule of Law estimates include uncertainty",
+    subtitle = "Ten largest mitigation-marked ODA recipients in the 2024 sample",
+    x = "Rule of Law score and 90% interval",
+    y = NULL,
+    caption = "Source: World Bank WGI, 2025 revision."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = "X")
+```
+
+```{r}
+
+selected_iso3 <- c("AFG", "JOR",
+                   "GTM", "MEX", "BRA",
+                   "PRK", "CHN", 
+                   "COD", "COG")
+
+governance_profile <- wb_2024 |>
+  filter(iso3 %in% selected_iso3) |>
+  select(
+    country,
+    voice_accountability,
+    political_stability,
+    government_effectiveness,
+    regulatory_quality,
+    rule_of_law,
+    control_of_corruption
+  ) |>
+  pivot_longer(
+    -country,
+    names_to = "governance",
+    values_to = "score"
+  ) #  |>
+  # mutate(
+  #   dimension = str_replace_all(___, "_", " ") |>
+  #     str_to_title()
+  # )
+
+governance_profile |> 
+  ggplot(aes(x = governance, y = country, 
+             fill = score)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  geom_text(aes(label = number(score, accuracy = 1)), size = 3.2) +
+  scale_fill_viridis_c(limits = c(0, 100), option = "C") +
+  labs(
+    title = "Governance profiles differ across dimensions",
+    subtitle = "Selected low- and middle-income economies, 2024",
+    x = NULL,
+    y = NULL,
+    fill = "Score",
+    caption = "Source: World Bank WGI, 2025 revision."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = FALSE) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+
+```
+
+```{r}
+world_sf <- world_polygons |>
+  # arrange(___, ___) |>
+  st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = ___
+  ) |>
+  group_by(iso3, country, continent, piece) |>
+  summarise(do_union = FALSE, .groups = "drop") |>
+  st_cast(___)
+
+map_values <- world_bank |>
+  filter(___ == 2024) |>
+  select(___, ___)
+
+world_map <- world_sf |>
+  left_join(map_values, by = "iso3")
+
+ggplot(world_map) +
+  geom_sf(aes(fill = ___), color = "white", linewidth = 0.08) +
+  coord_sf(crs = ___, datum = NA) +
+  scale_fill_viridis_c(
+    limits = c(0, 100),
+    na.value = "grey88",
+    option = "C"
+  ) +
+  labs(
+    title = "Rule of Law scores around the world",
+    subtitle = "Latest common WGI year in the course snapshot, 2024",
+    fill = "Score",
+    caption = "Sources: World Bank WGI and Natural Earth 1:110m Admin 0 boundaries. Equal Earth projection."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = FALSE) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "bottom"
+  )
+```
+
+
+
+
+```{r}
+world_sf <- world_polygons |>
+  arrange(piece, vertex_order) |>
+  st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = 4326
+  ) |>
+  group_by(iso3, country, continent, piece) |>
+  summarise(do_union = FALSE, .groups = "drop") |>
+  st_cast("POLYGON")
+
+map_values <- world_bank |>
+  filter(year == 2024) |>
+  select(iso3, rule_of_law)
+
+world_map <- world_sf |>
+  left_join(map_values, by = "iso3")
+
+ggplot(world_map) +
+  geom_sf(
+    aes(fill = rule_of_law),
+    color = "white",
+    linewidth = 0.08
+  ) +
+  coord_sf(crs = "+proj=eqearth", datum = NA) +
+  scale_fill_viridis_c(
+    limits = c(0, 100),
+    na.value = "grey88",
+    option = "C"
+  ) +
+  labs(
+    title = "Rule of Law scores around the world",
+    subtitle = "Latest common WGI year in the course snapshot, 2024",
+    fill = "Score",
+    caption = "Sources: World Bank WGI and Natural Earth 1:110m Admin 0 boundaries. Equal Earth projection."
+  ) +
+  theme_ipsum(base_family = "Arial", base_size = 14, grid = FALSE) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "bottom"
+  )
+
+```
+
