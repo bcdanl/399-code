@@ -1,0 +1,680 @@
+---
+title: "geom_sf()"
+format: html
+---
+
+
+```{r}
+library(tidyverse)
+library(scales)
+library(sf)
+library(hrbrthemes)
+library(ggrepel)
+
+theme_set(
+  theme_void(base_size = 15) +
+    theme(
+      legend.position = "bottom",
+      legend.title.position = "top",
+      legend.key.width = unit(2.4, "lines"),
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(size = rel(1)),
+      plot.caption = element_text(color = "grey40", hjust = 0),
+      plot.caption.position = "plot"
+    )
+)
+
+```
+
+
+```{r}
+# Boundaries and shapes (GeoJSON)
+counties <- read_sf("https://bcdanl.github.io/data/wildfire_us_counties_2020.geojson")
+states <- read_sf("https://bcdanl.github.io/data/wildfire_us_states_2020.geojson")
+provinces <- read_sf("https://bcdanl.github.io/data/wildfire_canada_provinces_2021.geojson")
+plumes <- read_sf("https://bcdanl.github.io/data/wildfire_hms_smoke_2023_06.geojson")
+nbac <- read_sf("https://bcdanl.github.io/data/wildfire_nbac_burned_area_2023.geojson")
+
+# Data tables (CSV)
+smoke_day <- read_csv(
+  "https://bcdanl.github.io/data/wildfire_smoke_county_day_2023_06.csv",
+  col_types = cols(GEOID = col_character())
+)
+smoke_month <- read_csv(
+  "https://bcdanl.github.io/data/wildfire_smoke_county_month_2006_2025.csv",
+  col_types = cols(GEOID = col_character())
+)
+ember <- read_csv(
+  "https://bcdanl.github.io/data/wildfire_ember_county_day_2023_06.csv",
+  col_types = cols(GEOID = col_character())
+)
+aqs <- read_csv(
+  "https://bcdanl.github.io/data/wildfire_aqs_pm25_2023_06.csv",
+  col_types = cols(GEOID = col_character(), site_id = col_character())
+)
+fires <- read_csv(
+  "https://bcdanl.github.io/data/wildfire_firms_canada_2023.csv",
+  col_types = cols(acq_time = col_character())
+)
+```
+
+
+```{r}
+# 0.7 * 90 + 0.3 * 100
+weighted.mean(c(90, 100), c(0.7, 0.3))
+
+mean(c(90, 100))
+```
+
+
+
+```{r}
+state_smoke_june7 <- smoke_day |>
+  filter(date == as.Date("2023-06-07")) |>
+  left_join(
+    counties |>
+      st_drop_geometry() |>
+      select(GEOID, STUSPS, state_name, region, pop_2020),
+    by = "GEOID"
+  ) |>
+  summarize(
+    smoke_pm25 = weighted.mean(smoke_pm25, pop_2020),
+    people = sum(pop_2020),
+    .by = c(STUSPS, state_name, region)
+  ) |> 
+  arrange(-smoke_pm25)
+```
+
+
+```{r}
+top_state_smoke <- state_smoke_june7 |>
+  filter(STUSPS != "DC") |>
+  group_by(region) |>
+  slice_max(smoke_pm25, n = 5) |>
+  ungroup()
+
+national_smoke <- weighted.mean(
+  state_smoke_june7$smoke_pm25,
+  state_smoke_june7$people
+)
+```
+
+
+```{r}
+p_state0 <- ggplot(
+  top_state_smoke,
+  aes(
+    x = smoke_pm25,
+    y = fct_reorder(state_name, smoke_pm25),
+    color = region
+  )
+)
+```
+
+
+```{r}
+p_state0
+```
+
+```{r}
+
+p_state0 <- ggplot(
+  top_state_smoke,
+  aes(
+    x = smoke_pm25,
+    y = fct_reorder(state_name, smoke_pm25),
+    color = region
+  )
+)
+
+p_state1 <- p_state0 +
+  geom_vline(xintercept = national_smoke,
+             color = "grey45",
+             linewidth = 0.5) +
+  geom_point(size = 2.4) +
+  scale_color_brewer(palette = "Dark2") +
+  theme_minimal(base_size = 13) +
+  labs(x = "Smoke PM2.5 (µg/m³)", y = NULL,
+       color = "Census region")
+
+p_state1
+```
+
+```{r}
+region_colors <- c(
+  Midwest = "#d79a2b", Northeast = "#b2182b",
+  South = "#3f78a8", West = "#578b67"
+)
+
+p_state2 <- p_state1 +
+  scale_color_manual(values = region_colors)
+p_state2
+```
+
+
+```{r}
+p_state2 +
+  facet_wrap(~ region, ncol = 2,
+             scales = "free_y") +
+  guides(color = "none")
+```
+
+
+
+```{r}
+p_state2 +
+  facet_wrap(~ region, ncol = 2,
+             scales = "free_y") +
+  guides(color = "none")
+```
+
+
+
+
+
+```{r}
+p_state2 +
+  facet_wrap(~ region, ncol = 4,
+             scales = "free_y") +
+  guides(color = "none")
+```
+
+
+
+
+
+```{r}
+p_state2 +
+  facet_wrap(~ region, ncol = 4,
+             scales = "free") +
+  guides(color = "none")
+```
+
+
+
+# geom_sf()
+
+```{r}
+ggplot(counties) +
+  geom_sf(fill = "#efe7d8",
+          color = "#8b7767",
+          linewidth = 0.1)
+```
+
+```{r}
+theme_set(
+  theme_void(base_size = 15) +
+    theme(
+      legend.position = "bottom",
+      legend.title.position = "top",
+      legend.key.width = unit(2.4, "lines"),
+      plot.title = element_text(face = "bold"),
+      strip.text = element_text(size = rel(1)),
+      plot.caption = element_text(color = "grey40", hjust = 0),
+      plot.caption.position = "plot"
+    )
+)
+```
+
+
+
+```{r}
+ggplot(counties) +
+  geom_sf(fill = "#efe7d8",
+          color = "#8b7767",
+          linewidth = 0.1)
+```
+
+
+
+```{r}
+state_lines <- geom_sf(
+  data = states, 
+  fill = NA,
+  # fill = "lightblue",
+  color = "grey25", linewidth = 0.25
+)
+
+ggplot() + 
+  state_lines
+```
+
+
+```{r}
+
+ggplot(counties) +
+  geom_sf(fill = "#efe7d8",
+          color = "#8b7767",
+          linewidth = 0.05) +
+  state_lines
+```
+
+
+```{r}
+regions <- counties |>
+  group_by(region) |>
+  summarize(pop = sum(pop_2020))
+
+ggplot(regions) +
+  geom_sf(aes(fill = region),
+          color = "white", linewidth = 0.3) +
+  scale_fill_manual(values = region_colors) +
+  geom_sf_label(
+    aes(label = paste0(region, "\n",
+      number(pop / 1e6, accuracy = 0.1),
+      "M")),
+    size = 3.2,
+    color = "#243b53", fill = "#fffaf0"
+  ) +
+  guides(fill = "none")
+```
+
+```{r}
+east_zoom <- coord_sf(
+  crs = "ESRI:102009",
+  xlim = c(-95, -60), ylim = c(36, 56),
+  default_crs = st_crs(4326)
+)
+
+ggplot() +
+  geom_sf(data = provinces,
+          fill = "#e7d9c4", color = "white") +
+  geom_sf(data = states,
+          fill = "grey80", color = "white") +
+  east_zoom
+```
+
+```{r}
+bad_ids <- as.character(as.numeric(smoke_day$GEOID))
+
+length(bad_ids)
+length( unique(bad_ids) )
+
+head(unique(bad_ids), 3)
+```
+
+```{r}
+counties$GEOID
+```
+
+
+```{r}
+bad_ids
+```
+
+
+```{r}
+# "01001" is not in bad_ids
+```
+
+
+```{r}
+counties$GEOID %in% bad_ids
+```
+
+
+```{r}
+sum( counties$GEOID %in% bad_ids )
+```
+
+```{r}
+sum(!counties$GEOID %in% bad_ids)
+```
+
+
+```{r}
+sum(! counties$GEOID %in% smoke_day$GEOID )
+```
+
+```{r}
+june7 <- smoke_day |>
+  filter(date == as.Date("2023-06-07"))
+
+smoke_june7 <- counties |>
+  left_join(june7, by = "GEOID")
+
+class(smoke_june7)
+```
+
+
+```{r}
+smoke_category <- smoke_june7 |>
+  mutate(smoke_band = case_when(
+                          smoke_pm25 < 15 ~ "<15",
+                          smoke_pm25 <= 35 ~ "15–35",
+                          TRUE ~ ">35"
+                        ) 
+    ) |> 
+  mutate(smoke_band = factor(smoke_band,
+                             levels = c("<15", "15–35", ">35"))
+         )
+
+us_albers <- coord_sf(crs = "ESRI:102003")
+
+p_band0 <- ggplot(
+  smoke_category,
+  aes(fill = smoke_band)
+) +
+  geom_sf(color = NA) + 
+  state_lines +
+  scale_fill_brewer(
+    palette = "YlOrRd",
+    name = "Smoke PM2.5 (µg/m³)"
+  ) +
+  us_albers +
+  theme(legend.position = "right")
+p_band0
+```
+
+
+```{r}
+na_lcc <- coord_sf(crs = "ESRI:102009")
+
+ggplot() +
+  geom_sf(data = provinces,
+          fill = "#e7d9c4",
+          color = "white") +
+  geom_sf(data = states,
+          fill = "grey80",
+          color = "white") +
+  na_lcc
+```
+
+```{r}
+
+smoke_county <- counties |>
+  left_join(smoke_day, by = "GEOID")
+
+```
+
+
+```{r}
+june7_chr <- smoke_day |>
+  filter(date == "2023-06-07")
+
+june7 <- smoke_day |>
+  filter(date == as.Date("2023-06-07"))
+
+smoke_june7 <- counties |>
+  left_join(june7, by = "GEOID")
+
+class(smoke_june7)
+```
+
+
+
+```{r}
+smoke_category <- smoke_june7 |>
+  mutate(smoke_band = case_when(
+                          smoke_pm25 < 15 ~ "<15",
+                          smoke_pm25 <= 35 ~ "15–35",
+                          TRUE ~ ">35"
+                        ) 
+    ) |> 
+  mutate(smoke_band = factor(smoke_band,
+                             levels = c("<15", "15–35", ">35"))
+         )
+
+us_albers <- coord_sf(crs = "ESRI:102003")
+
+p_band_1 <- ggplot(
+  smoke_category,
+  aes(fill = smoke_band)
+) +
+  geom_sf(color = "grey90",
+          linewidth = .05) + 
+  state_lines +
+  scale_fill_brewer(
+    palette = "YlOrRd",
+    name = "Smoke PM2.5 (µg/m³)"
+  ) +
+  us_albers +
+  theme(legend.position = "bottom")
+
+p_band_1
+```
+```{r}
+# c(1,2,3)
+
+# named vector in R
+smoke_band_colors <- c(
+  "<15" = "#fff7bc",
+  "15–35" = "#fdae61",
+  ">35" = "#b2182b"
+)
+
+smoke_band_colors
+
+
+smoke_band_colors_noname <- c(
+  "#fff7bc",
+  "#fdae61",
+  "#b2182b"
+)
+
+
+smoke_band_colors_noname <- c(
+  "#b2182b",
+  "#fff7bc",
+  "#fdae61"
+)
+
+smoke_band_colors
+smoke_band_colors_noname
+
+p_band1 <- p_band0 +
+  scale_fill_manual(
+    values = smoke_band_colors,
+    name = "Smoke PM2.5 (µg/m³)"
+  )
+p_band1
+```
+```{r}
+p_band2 <- p_band1 +
+  guides(fill = guide_legend(nrow = 1)) +
+  theme(legend.position = "bottom")
+p_band2
+```
+
+
+```{r}
+reversed_colors <- setNames(
+  rev(unname(smoke_band_colors)),
+  names(smoke_band_colors)
+)
+
+reversed_colors
+
+p_band0 +
+  scale_fill_manual(
+    values = reversed_colors,
+    name = "Smoke PM2.5 (µg/m³)"
+  )
+```
+
+```{r}
+p_smoke0 <- ggplot(smoke_june7,
+                   aes(fill = smoke_pm25)) +
+  geom_sf(color = NA) + 
+  state_lines +
+  scale_fill_viridis_c(
+    option = "inferno",
+    direction = -1,
+    name = "Smoke PM2.5 (µg/m³)"
+  ) +
+  us_albers +
+  labs(caption = "June 7, 2023 · CSU")
+p_smoke0
+```
+
+
+```{r}
+p_band0 +
+  scale_fill_viridis_d()
+```
+
+
+```{r}
+
+p_smoke0 +
+  scale_fill_gradient(
+    low = "white", high = "black",
+    name = "Smoke PM2.5 (µg/m³)"
+  )
+```
+
+
+```{r}
+p_smoke0 +
+  scale_fill_gradient(
+    low = "#fff7bc", high = "#b2182b",
+    name = "Smoke PM2.5 (µg/m³)"
+  )
+```
+
+
+```{r}
+p_smoke0 +
+  scale_fill_gradient(
+    low = "#fff7bc", high = "#b2182b",
+    limits = c(0, 75), 
+    oob = squish,
+    name = "Smoke PM2.5 (µg/m³)"
+  ) +
+  labs(caption = paste(
+    "June 7, 2023 · values above 75",
+    "share one color"
+  ))
+```
+
+
+```{r}
+pm25_bins <- scale_fill_fermenter(
+  palette = "YlOrRd", direction = 1,
+  breaks = c(5, 15, 35, 75, 150),
+  name = "PM2.5 (µg/m³)"
+)
+
+ggplot(smoke_june7) +
+  geom_sf(aes(fill = smoke_pm25),
+          color = NA) +
+  state_lines + 
+  pm25_bins + 
+  us_albers +
+  labs(caption =
+    "Smoke PM2.5, June 7, 2023 · CSU")
+```
+
+
+```{r}
+q_breaks <- quantile(june7$smoke_pm25,
+                     c(0.2, 0.4, 0.6, 0.8))
+
+ggplot(smoke_june7) +
+  geom_sf(aes(fill = smoke_pm25),
+          color = NA) +
+  state_lines + us_albers +
+  scale_fill_fermenter(
+    palette = "YlOrRd", direction = 1,
+    breaks = q_breaks,
+    labels = label_number(0.1),
+    name = "Smoke PM2.5 (quintiles)"
+  )
+```
+
+
+
+
+```{r}
+q_breaks_4 <- quantile(june7$smoke_pm25,
+                     c(0.25, 0.5, 0.75))
+
+ggplot(smoke_june7) +
+  geom_sf(aes(fill = smoke_pm25),
+          color = NA) +
+  state_lines + us_albers +
+  scale_fill_fermenter(
+    palette = "YlOrRd", direction = 1,
+    breaks = q_breaks_4,
+    labels = label_number(0.1),
+    name = "Smoke PM2.5 (quintiles)"
+  )
+```
+
+```{r}
+june_diff <- smoke_month |>
+  filter(month == 6) |>
+  group_by(GEOID) |>
+  summarize(diff = smoke_pm25[year == 2023] -
+    mean(smoke_pm25[year <= 2022]))
+
+counties |>
+  left_join(june_diff, by = "GEOID") |>
+  ggplot(aes(fill = diff)) +
+  geom_sf(color = NA) + 
+  state_lines +
+  scale_fill_gradient2(
+    midpoint = 0,
+    low = "#2166ac", high = "#b2182b",
+    name = "Change vs. usual June (µg/m³)") +
+  us_albers
+```
+
+```{r}
+
+counties |>
+  left_join(june_diff, by = "GEOID") |>
+  ggplot(aes(fill = diff)) +
+  geom_sf(color = NA) + 
+  state_lines +
+  scale_fill_gradient(
+    low = "#2166ac", high = "#b2182b",
+    name = "Change vs. usual June (µg/m³)") +
+  us_albers
+```
+
+```{r}
+june23 <- smoke_month |>
+  filter(year == 2023, month == 6)
+
+days_map <- counties |>
+  left_join(june23, by = "GEOID") |>
+  mutate(person_days = days_gt15 * pop_2020)
+
+ggplot(days_map, aes(fill = days_gt15)) +
+  geom_sf(color = NA) + state_lines +
+  scale_fill_viridis_c(option = "magma",
+    direction = -1,
+    name = "Days with smoke > 15 µg/m³") +
+  us_albers
+```
+
+```{r}
+
+ggplot(days_map, aes(fill = person_days)) +
+  geom_sf(color = NA) + state_lines +
+  scale_fill_viridis_c(option = "magma",
+    direction = -1,
+    name = "Days with smoke > 15 µg/m³") +
+  us_albers
+```
+
+
+```{r}
+monitor_june7 <- aqs |>
+  filter(date == as.Date("2023-06-07")) |>
+  group_by(GEOID) |>
+  summarize(pm25 = mean(pm25))
+
+counties |>
+  left_join(monitor_june7, by = "GEOID") |>
+  ggplot(aes(fill = pm25)) +
+  geom_sf(color = NA) + state_lines +
+  scale_fill_fermenter(palette = "YlOrRd",
+    direction = 1, 
+    # na.value = "grey85",
+    breaks = c(5, 15, 35, 75, 150),
+    name = "Monitor PM2.5 (µg/m³)") +
+  us_albers
+```
+
